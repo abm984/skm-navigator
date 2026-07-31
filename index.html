@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>SKM Campus Navigator</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<style>
+  :root{
+    --bg:#0b1020;--panel:#0e1728e6;--line:#243352;--ink:#e8eef8;--muted:#8fa0bf;--faint:#5d6e8f;
+    --accent:#3dd4a7;--road:#6b7fb0;--build:#38bdf8;--route:#ffb020;--gps:#39d98a;--danger:#f4626b;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;--sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;overflow:hidden;font-family:var(--sans);background:var(--bg);color:var(--ink)}
+  #map{position:absolute;inset:0;background:#0b1020}
+  .leaflet-container{background:#0b1020;font-family:var(--sans)}
+
+  /* ---- search (google-maps style) ---- */
+  .searchwrap{position:absolute;top:10px;left:10px;right:10px;z-index:1100}
+  .searchbar{display:flex;align-items:center;gap:9px;background:var(--panel);border:1px solid var(--line);
+    backdrop-filter:blur(12px);border-radius:13px;padding:11px 13px;box-shadow:0 8px 30px rgba(0,0,0,.4)}
+  .searchbar .mi{color:var(--faint);font-size:15px}
+  .searchbar input{flex:1;background:none;border:none;outline:none;color:var(--ink);font-size:15px}
+  .searchbar input::placeholder{color:var(--faint)}
+  .searchbar .gps{width:9px;height:9px;border-radius:50%;background:var(--faint);flex:none}
+  .searchbar .gps.live{background:var(--gps);box-shadow:0 0 0 3px rgba(57,217,138,.2)}
+  .results{margin-top:7px;background:var(--panel);border:1px solid var(--line);backdrop-filter:blur(12px);
+    border-radius:13px;overflow:hidden;max-height:52vh;overflow-y:auto;display:none;box-shadow:0 8px 30px rgba(0,0,0,.45)}
+  .results.show{display:block}
+  .rrow{display:flex;align-items:center;gap:11px;padding:11px 13px;cursor:pointer;border-bottom:1px solid #182238}
+  .rrow:last-child{border-bottom:none}
+  .rrow:active{background:#12203c}
+  .rrow .ic{width:26px;height:26px;border-radius:8px;flex:none;display:flex;align-items:center;justify-content:center;font-size:13px}
+  .rrow .ic.b{background:#0e2a44;color:var(--build)} .rrow .ic.r{background:#1b2440;color:var(--road)}
+  .rrow .nm{flex:1;font-size:14px;line-height:1.25}
+  .rrow .dist{font-family:var(--mono);font-size:11px;color:var(--faint)}
+  .rrow.head{cursor:default;font-family:var(--mono);font-size:10px;letter-spacing:1px;color:var(--faint);
+    text-transform:uppercase;padding:8px 13px;background:#0b1424}
+
+  /* ---- right fabs ---- */
+  .fabs{position:absolute;right:11px;bottom:calc(var(--sheeth,150px) + 14px);z-index:1000;display:flex;flex-direction:column;gap:9px}
+  .fab{width:44px;height:44px;border-radius:12px;background:var(--panel);border:1px solid var(--line);
+    backdrop-filter:blur(10px);color:var(--ink);font-size:18px;display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .fab:active{transform:scale(.94)} .fab.on{border-color:var(--accent);color:var(--accent)}
+
+  /* ---- bottom sheet ---- */
+  .sheet{position:absolute;left:0;right:0;bottom:0;z-index:1000;background:linear-gradient(180deg,#0d1524f7,#0b1020);
+    border-top:1px solid var(--line);border-radius:18px 18px 0 0;padding:9px 12px 13px;box-shadow:0 -12px 40px rgba(0,0,0,.5)}
+  .grip{width:38px;height:4px;border-radius:4px;background:#2a3a5c;margin:1px auto 9px}
+  .navinfo{display:none;background:#0c1424;border:1px solid var(--line);border-radius:13px;padding:12px 14px;margin-bottom:9px}
+  .navinfo.show{display:block}
+  .navinfo .row1{display:flex;align-items:baseline;gap:10px}
+  .navinfo .big{font-family:var(--mono);font-size:23px;font-weight:700;color:var(--route)}
+  .navinfo .eta{font-family:var(--mono);font-size:12px;color:var(--muted)}
+  .navinfo .to{font-size:13px;color:var(--ink);margin-top:3px}
+  .navinfo .x{float:right;color:var(--muted);cursor:pointer;font-size:17px;padding:0 4px;margin:-2px}
+  .navinfo .meta{font-size:11px;color:var(--faint);font-family:var(--mono);margin-top:5px}
+  .tools{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+  .tool{background:#0c1424;border:1px solid var(--line);border-radius:11px;padding:8px 3px;cursor:pointer;
+    display:flex;flex-direction:column;align-items:center;gap:3px;font-size:9.5px;color:var(--muted);line-height:1.1;text-align:center}
+  .tool .ic{font-size:16px} .tool.active{border-color:var(--accent);color:var(--accent);background:#0e1c30}
+  .hint{margin-top:8px;font-size:11px;color:var(--faint);font-family:var(--mono);line-height:1.5;min-height:15px}
+  .menu-row{display:flex;gap:6px;margin-top:8px}
+  .menu-row button{flex:1;background:#0c1424;border:1px solid var(--line);color:var(--muted);border-radius:9px;
+    padding:7px;font-size:10.5px;font-family:var(--mono);cursor:pointer}
+  .menu-row button:active{border-color:var(--accent)} .menu-row button.danger{color:var(--danger)}
+  input[type=file]{display:none}
+  .toast{position:absolute;bottom:calc(var(--sheeth,150px) + 20px);left:50%;transform:translateX(-50%);z-index:1200;
+    background:#0c1424;border:1px solid var(--line);padding:9px 15px;border-radius:10px;font-size:12px;font-family:var(--mono);
+    opacity:0;transition:.25s;pointer-events:none;box-shadow:0 10px 40px rgba(0,0,0,.5);max-width:82%;text-align:center}
+  .toast.show{opacity:1}
+  .banner{position:absolute;top:64px;left:10px;right:10px;z-index:1100;background:#2a141c;border:1px solid var(--danger);
+    color:#ffd9dd;border-radius:12px;padding:10px 13px;font-size:12px;line-height:1.5;display:none}
+  .banner b{color:#ffb020}
+  .leaflet-control-attribution{background:#0c1424cc!important;color:#5d6e8f!important;font-size:9px!important}
+  .leaflet-control-attribution a{color:#8fa0bf!important}
+  .leaflet-bar a{background:#0e1728!important;color:#e8eef8!important;border-color:#243352!important}
+  .blabel{background:#0c1424dd;border:1px solid #2a3c5e;color:#dbe6f7;font-size:11px;padding:2px 7px;border-radius:7px;
+    white-space:nowrap;font-weight:500} .blabel::before{display:none!important}
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div class="searchwrap">
+  <div class="searchbar">
+    <span class="mi">🔍</span>
+    <input id="search" placeholder="Search SKM — buildings, gates, offices…" autocomplete="off" />
+    <span class="gps" id="gpsDot" title="GPS"></span>
+  </div>
+  <div class="results" id="results"></div>
+</div>
+
+<div class="banner" id="banner"></div>
+
+<div class="fabs">
+  <div class="fab" id="followBtn" title="Follow me">🧭</div>
+  <div class="fab" id="locateBtn" title="Center on me">◉</div>
+</div>
+
+<div class="sheet" id="sheet">
+  <div class="grip"></div>
+  <div class="navinfo" id="navinfo">
+    <span class="x" id="navX">✕</span>
+    <div class="row1"><span class="big" id="navDist">—</span><span class="eta" id="navEta"></span></div>
+    <div class="to" id="navTo"></div>
+    <div class="meta" id="navMeta"></div>
+  </div>
+  <div class="tools">
+    <div class="tool active" data-tool="nav"><span class="ic">🧭</span>Navigate</div>
+    <div class="tool" data-tool="path"><span class="ic" style="color:var(--road)">━</span>Trace</div>
+    <div class="tool" data-tool="dest"><span class="ic" style="color:var(--build)">◆</span>Add place</div>
+    <div class="tool" data-tool="link"><span class="ic" style="color:var(--accent)">╳</span>Link</div>
+    <div class="tool" data-tool="del"><span class="ic" style="color:var(--danger)">✕</span>Delete</div>
+  </div>
+  <div class="hint" id="hint">Search or tap any place to get a route from your GPS location.</div>
+  <div class="menu-row">
+    <button id="surveyBtn">📍 Drop node here (GPS)</button>
+    <button id="breakBtn">⤿ New segment</button>
+  </div>
+  <div class="menu-row">
+    <button id="exportBtn">⭳ Export</button>
+    <button onclick="document.getElementById('importInput').click()">⭱ Import</button>
+    <button id="reloadBtn">↻ SKM data</button>
+    <button id="resetBtn" class="danger">Clear</button>
+  </div>
+  <input type="file" id="importInput" accept="application/json" />
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+"use strict";
+/* ========= baked-in Shaukat Khanum campus (49 locations, auto-network) ========= */
+const SKM_DEFAULT = {"nodes":[{"id":"n0","name":"Standard chartered ATM SKM","lat":31.44804566,"lng":74.27123219,"type":"path","kind":"ROAD"},{"id":"n1","name":"Employee Cafeteria Skm","lat":31.4491279,"lng":74.2712474,"type":"dest","kind":"BUILDING"},{"id":"n2","name":"Red Office Main Zone","lat":31.4478315,"lng":74.2731062,"type":"dest","kind":"BUILDING"},{"id":"n3","name":"COVID 19 camp OPD side COVID 19 camp road","lat":31.4480794,"lng":74.2716181,"type":"path","kind":"ROAD"},{"id":"n4","name":"Masjid and Walking clinic junction 2 Masjid and parking plaza junction","lat":31.44726766,"lng":74.27141011,"type":"path","kind":"ROAD"},{"id":"n5","name":"Pharmacy Medical center pharmacy","lat":31.4484011,"lng":74.2717739,"type":"dest","kind":"BUILDING"},{"id":"n6","name":"Walking clinic parking plaza junction Parking plaza junction 1","lat":31.4473836,"lng":74.27119821,"type":"path","kind":"ROAD"},{"id":"n7","name":"HR Office HR Building SKM","lat":31.44749038,"lng":74.27259117,"type":"dest","kind":"BUILDING"},{"id":"n8","name":"Employee Gate Skm","lat":31.4498083,"lng":74.2717867,"type":"path","kind":"ROAD"},{"id":"n9","name":"OPD Center Reception Out Patient Center Reception","lat":31.448282,"lng":74.2715618,"type":"dest","kind":"BUILDING"},{"id":"n10","name":"MIS Water cooler road MIS office corner","lat":31.4475709,"lng":74.2727583,"type":"path","kind":"ROAD"},{"id":"n11","name":"Bike Stand Stop SKM Bike Stand","lat":31.44752242,"lng":74.2707324,"type":"dest","kind":"BUILDING"},{"id":"n12","name":"Cafe to Emp gate junction","lat":31.44925689,"lng":74.27184284,"type":"path","kind":"ROAD"},{"id":"n13","name":"Masjid and Walking clinic junction","lat":31.44707544,"lng":74.27141547,"type":"path","kind":"ROAD"},{"id":"n14","name":"OPD east side Shaukat Khanum","lat":31.4481666,"lng":74.2719482,"type":"dest","kind":"BUILDING"},{"id":"n15","name":"Baghum-mir Washrooms Baghum-mir building","lat":31.4472222,"lng":74.2730173,"type":"path","kind":"ROAD"},{"id":"n16","name":"Cornor Acute ER road Emergency building","lat":31.4487942,"lng":74.2725902,"type":"path","kind":"ROAD"},{"id":"n17","name":"Baghum-mir building Main Zone","lat":31.4474494,"lng":74.2729804,"type":"dest","kind":"BUILDING"},{"id":"n18","name":"Skm laboratory Laboratory","lat":31.44697095,"lng":74.27131444,"type":"dest","kind":"BUILDING"},{"id":"n19","name":"Public SKM Washrooms Public SKM Washrooms","lat":31.44703731,"lng":74.27155048,"type":"path","kind":"ROAD"},{"id":"n20","name":"Skm jheel right side road Jheel SKM","lat":31.4492431,"lng":74.2707745,"type":"path","kind":"ROAD"},{"id":"n21","name":"MIS Store Main MIS Store","lat":31.44747436,"lng":74.27141368,"type":"dest","kind":"BUILDING"},{"id":"n22","name":"Shed Cafe Shaukat Khanum","lat":31.4492977,"lng":74.2713197,"type":"dest","kind":"BUILDING"},{"id":"n23","name":"CEO HOME Ceo residential","lat":31.4496741,"lng":74.27280307,"type":"dest","kind":"BUILDING"},{"id":"n24","name":"Skm admin block Admin block","lat":31.44711253,"lng":74.27205721,"type":"dest","kind":"BUILDING"},{"id":"n25","name":"Marketing Cornor Chouk Cricket Group Cornor right of Marketing","lat":31.44779472,"lng":74.27258849,"type":"path","kind":"ROAD"},{"id":"n26","name":"Marketing Building Marketing offices","lat":31.4476627,"lng":74.272583,"type":"dest","kind":"BUILDING"},{"id":"n27","name":"Day Care || Baby care building SKM","lat":31.4476667,"lng":74.2730707,"type":"dest","kind":"BUILDING"},{"id":"n28","name":"Times office and cafe junction Times office and cafe junction","lat":31.4489733,"lng":74.2716182,"type":"path","kind":"ROAD"},{"id":"n29","name":"OPD entry gate SKM","lat":31.4480778,"lng":74.2714026,"type":"path","kind":"ROAD"},{"id":"n30","name":"Times Office Security Zone","lat":31.44852237,"lng":74.27182943,"type":"path","kind":"ROAD"},{"id":"n31","name":"Skm jheel left side road Near emp cafe SKM","lat":31.44927367,"lng":74.27107394,"type":"path","kind":"ROAD"},{"id":"n32","name":"MIS and HR and Marketing turn MIS and HR & Marketing Offices turn","lat":31.44758649,"lng":74.27237928,"type":"path","kind":"ROAD"},{"id":"n33","name":"Walking clinic SKM Walking clinic","lat":31.44716926,"lng":74.27126527,"type":"dest","kind":"BUILDING"},{"id":"n34","name":"Times Office Entrance Acute&Time Office road","lat":31.44858644,"lng":74.27255362,"type":"path","kind":"ROAD"},{"id":"n35","name":"SKM Main Gate SKM Main Gate Entrance","lat":31.44780158,"lng":74.27052587,"type":"path","kind":"ROAD"},{"id":"n36","name":"Medical records parking plaza Shaukat Khanum","lat":31.447653,"lng":74.2714246,"type":"dest","kind":"BUILDING"},{"id":"n37","name":"SKM Main Gate road OPD Front rood","lat":31.44786336,"lng":74.27163363,"type":"path","kind":"ROAD"},{"id":"n38","name":"Parking plaza junction 2 Parking plaza junction 2","lat":31.4478115,"lng":74.27114993,"type":"path","kind":"ROAD"},{"id":"n39","name":"PET CT SKM PET CT road","lat":31.44706477,"lng":74.27103549,"type":"path","kind":"ROAD"},{"id":"n40","name":"MIS Offices MIS","lat":31.4474858,"lng":74.27263409,"type":"dest","kind":"BUILDING"},{"id":"n41","name":"Masjid Shaukat Khanum Masjid","lat":31.4470815,"lng":74.2717505,"type":"path","kind":"ROAD"},{"id":"n42","name":"SKM Main reception Skm","lat":31.4486078,"lng":74.2712286,"type":"dest","kind":"BUILDING"},{"id":"n43","name":"Cafe and Main reception Road Cafe and Main Reception Junction","lat":31.44887476,"lng":74.27126884,"type":"path","kind":"ROAD"},{"id":"n44","name":"Masjid and admin block turn Skm Masjid and admin block turn","lat":31.44728673,"lng":74.27238107,"type":"path","kind":"ROAD"},{"id":"n45","name":"Hospital Main Entrance Near Reception Reception/Shaukat Khanum Stop","lat":31.44857195,"lng":74.27110344,"type":"path","kind":"ROAD"},{"id":"n46","name":"Shama and aslam clinical center road Old Serviced building","lat":31.4492858,"lng":74.2724574,"type":"path","kind":"ROAD"},{"id":"n47","name":"Parking Plaza Center Parking plaza","lat":31.44753386,"lng":74.27175164,"type":"dest","kind":"BUILDING"},{"id":"n48","name":"MIS Chouk Road turn MIS and Marketing turn","lat":31.44778785,"lng":74.2723766,"type":"path","kind":"ROAD"}],"edges":[{"a":"n0","b":"n29"},{"a":"n0","b":"n38"},{"a":"n0","b":"n3"},{"a":"n3","b":"n29"},{"a":"n3","b":"n37"},{"a":"n4","b":"n13"},{"a":"n4","b":"n6"},{"a":"n4","b":"n19"},{"a":"n6","b":"n39"},{"a":"n6","b":"n13"},{"a":"n8","b":"n12"},{"a":"n8","b":"n46"},{"a":"n8","b":"n31"},{"a":"n10","b":"n25"},{"a":"n10","b":"n32"},{"a":"n10","b":"n48"},{"a":"n12","b":"n28"},{"a":"n12","b":"n46"},{"a":"n13","b":"n19"},{"a":"n13","b":"n41"},{"a":"n15","b":"n10"},{"a":"n15","b":"n44"},{"a":"n15","b":"n32"},{"a":"n16","b":"n34"},{"a":"n16","b":"n46"},{"a":"n16","b":"n30"},{"a":"n19","b":"n41"},{"a":"n20","b":"n31"},{"a":"n20","b":"n43"},{"a":"n20","b":"n45"},{"a":"n25","b":"n48"},{"a":"n25","b":"n32"},{"a":"n28","b":"n43"},{"a":"n28","b":"n30"},{"a":"n29","b":"n37"},{"a":"n30","b":"n3"},{"a":"n30","b":"n29"},{"a":"n31","b":"n43"},{"a":"n31","b":"n28"},{"a":"n32","b":"n48"},{"a":"n32","b":"n44"},{"a":"n34","b":"n30"},{"a":"n34","b":"n46"},{"a":"n35","b":"n38"},{"a":"n35","b":"n0"},{"a":"n35","b":"n6"},{"a":"n37","b":"n0"},{"a":"n38","b":"n29"},{"a":"n38","b":"n37"},{"a":"n39","b":"n13"},{"a":"n39","b":"n4"},{"a":"n41","b":"n4"},{"a":"n43","b":"n45"},{"a":"n44","b":"n10"},{"a":"n44","b":"n48"},{"a":"n45","b":"n0"},{"a":"n45","b":"n29"},{"a":"n1","b":"n31"},{"a":"n1","b":"n43"},{"a":"n2","b":"n10"},{"a":"n2","b":"n25"},{"a":"n5","b":"n30"},{"a":"n5","b":"n3"},{"a":"n7","b":"n10"},{"a":"n7","b":"n32"},{"a":"n9","b":"n3"},{"a":"n9","b":"n29"},{"a":"n11","b":"n35"},{"a":"n11","b":"n6"},{"a":"n14","b":"n3"},{"a":"n14","b":"n30"},{"a":"n17","b":"n10"},{"a":"n17","b":"n15"},{"a":"n18","b":"n13"},{"a":"n18","b":"n19"},{"a":"n21","b":"n6"},{"a":"n21","b":"n4"},{"a":"n22","b":"n31"},{"a":"n22","b":"n28"},{"a":"n23","b":"n46"},{"a":"n23","b":"n8"},{"a":"n24","b":"n41"},{"a":"n24","b":"n44"},{"a":"n26","b":"n25"},{"a":"n26","b":"n10"},{"a":"n27","b":"n10"},{"a":"n27","b":"n25"},{"a":"n33","b":"n4"},{"a":"n33","b":"n13"},{"a":"n36","b":"n37"},{"a":"n36","b":"n38"},{"a":"n40","b":"n10"},{"a":"n40","b":"n32"},{"a":"n42","b":"n45"},{"a":"n42","b":"n43"},{"a":"n47","b":"n37"},{"a":"n47","b":"n4"}]};
+
+const uid=()=>Math.random().toString(36).slice(2,9);
+const $=s=>document.querySelector(s);
+let state={nodes:[],edges:[]};
+let ui={tool:'nav',lastPath:null,target:null,follow:false,manualStart:null};
+let gps=null, routeCache=null;
+
+/* ---- map ---- */
+const map=L.map('map',{zoomControl:true,attributionControl:true}).setView([31.44803,74.27182],17);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:20,attribution:'© OpenStreetMap'}).addTo(map);
+const gEdges=L.layerGroup().addTo(map), gRoute=L.layerGroup().addTo(map), gNodes=L.layerGroup().addTo(map);
+let gpsMarker=null,gpsCircle=null;
+
+/* ---- geo ---- */
+function hav(a,b){const R=6371000,r=Math.PI/180;const dLat=(b.lat-a.lat)*r,dLng=(b.lng-a.lng)*r;
+  const la1=a.lat*r,la2=b.lat*r;const x=Math.sin(dLat/2)**2+Math.cos(la1)*Math.cos(la2)*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(x));}
+function toXY(p,ref){const mLat=111320,mLng=111320*Math.cos(ref*Math.PI/180);return{x:p.lng*mLng,y:p.lat*mLat};}
+function fromXY(x,y,ref){const mLat=111320,mLng=111320*Math.cos(ref*Math.PI/180);return{lat:y/mLat,lng:x/mLng};}
+function projectOnSeg(p,a,b){const ref=p.lat;const P=toXY(p,ref),A=toXY(a,ref),B=toXY(b,ref);
+  const dx=B.x-A.x,dy=B.y-A.y,l2=dx*dx+dy*dy;let t=l2===0?0:((P.x-A.x)*dx+(P.y-A.y)*dy)/l2;t=Math.max(0,Math.min(1,t));
+  const q=fromXY(A.x+t*dx,A.y+t*dy,ref);return{lat:q.lat,lng:q.lng,dist:hav(p,q)};}
+
+/* ---- routing ---- */
+function adjacency(xn=[],xe=[]){const nodes=state.nodes.concat(xn);const byId=new Map(nodes.map(n=>[n.id,n]));const adj=new Map();
+  const push=(a,b)=>{if(!byId.has(a)||!byId.has(b))return;const w=hav(byId.get(a),byId.get(b));
+    (adj.get(a)||adj.set(a,[]).get(a)).push({to:b,w});(adj.get(b)||adj.set(b,[]).get(b)).push({to:a,w});};
+  state.edges.concat(xe).forEach(e=>push(e.a,e.b));return{adj,byId};}
+function astar(sId,gId,byId,adj){if(!adj.has(sId)||!byId.has(gId))return null;const goal=byId.get(gId);const h=i=>hav(byId.get(i),goal);
+  const g={[sId]:0},f={[sId]:h(sId)},came={},open=new Set([sId]);
+  while(open.size){let cur=null,best=Infinity;for(const id of open){const v=f[id]??Infinity;if(v<best){best=v;cur=id;}}
+    if(cur===gId){const p=[cur];while(came[cur]!==undefined){cur=came[cur];p.unshift(cur);}return{path:p,cost:g[gId]};}
+    open.delete(cur);for(const{to,w}of(adj.get(cur)||[])){const t=g[cur]+w;if(t<(g[to]??Infinity)){came[to]=cur;g[to]=t;f[to]=t+h(to);open.add(to);}}}
+  return null;}
+function snapStart(pt){if(!state.edges.length){let best=null;state.nodes.forEach(n=>{const d=hav(pt,n);if(!best||d<best.d)best={n,d};});
+    return best?{startId:best.n.id,snap:best.n,dist:best.d,extraEdges:[]}:null;}
+  let best=null;for(const e of state.edges){const a=state.nodes.find(n=>n.id===e.a),b=state.nodes.find(n=>n.id===e.b);if(!a||!b)continue;
+    const pr=projectOnSeg(pt,a,b);if(!best||pr.dist<best.pr.dist)best={a,b,pr};}
+  if(!best)return null;const v={id:'__start__',lat:best.pr.lat,lng:best.pr.lng};
+  return{virtual:v,extraEdges:[{a:v.id,b:best.a.id},{a:v.id,b:best.b.id}],startId:v.id,snap:best.pr,dist:best.pr.dist};}
+
+function routeTo(destId){
+  const dest=state.nodes.find(n=>n.id===destId);if(!dest)return;
+  let startPt,startExtra={xn:[],xe:[],startId:null,snap:null,dist:0},fromLabel;
+  if(gps){const s=snapStart(gps);if(!s){toast('Network not ready');return;}
+    startExtra={xn:s.virtual?[s.virtual]:[],xe:s.extraEdges,startId:s.startId,snap:s.snap,dist:s.dist};
+    startPt=[gps.lat,gps.lng];fromLabel='your location';
+  } else if(ui.manualStart){const n=state.nodes.find(x=>x.id===ui.manualStart);startExtra.startId=n.id;startPt=[n.lat,n.lng];startExtra.snap=n;fromLabel=n.name;
+  } else {toast('Waiting for GPS… or tap a place to set start');return;}
+  const {adj,byId}=adjacency(startExtra.xn,startExtra.xe);
+  const res=astar(startExtra.startId,destId,byId,adj);
+  if(!res){toast('No path — connect this place to the network');clearRoute();return;}
+  const pts=res.path.map(id=>{const n=byId.get(id);return [n.lat,n.lng];});
+  gRoute.clearLayers();
+  L.polyline([startPt,...pts],{color:'#ffb020',weight:6,opacity:.95,lineCap:'round',lineJoin:'round'}).addTo(gRoute);
+  if(gps&&startExtra.snap)L.polyline([startPt,[startExtra.snap.lat,startExtra.snap.lng]],{color:'#ffb020',weight:3,dashArray:'2,7',opacity:.7}).addTo(gRoute);
+  const total=res.cost+startExtra.dist;routeCache={destId,total};
+  showNav(dest.name,total,fromLabel);
+}
+function showNav(name,m,from){$('#navinfo').classList.add('show');
+  $('#navDist').textContent=m>=1000?(m/1000).toFixed(2)+' km':Math.round(m)+' m';
+  const mins=Math.max(1,Math.round(m/1.35/60));$('#navEta').textContent='~'+mins+' min walk';
+  $('#navTo').textContent='→ '+name;$('#navMeta').textContent='from '+from+' · following campus paths';measureSheet();}
+function clearRoute(){gRoute.clearLayers();routeCache=null;ui.target=null;$('#navinfo').classList.remove('show');measureSheet();}
+
+/* ---- render ---- */
+function render(){
+  gEdges.clearLayers();gNodes.clearLayers();
+  state.edges.forEach(e=>{const a=state.nodes.find(n=>n.id===e.a),b=state.nodes.find(n=>n.id===e.b);
+    if(a&&b)L.polyline([[a.lat,a.lng],[b.lat,b.lng]],{color:'#33456e',weight:3.5,opacity:.8}).addTo(gEdges);});
+  state.nodes.forEach(n=>{const isB=n.kind==='BUILDING'||n.type==='dest';
+    const m=L.circleMarker([n.lat,n.lng],{radius:isB?7:4.5,weight:2,color:'#0b1020',
+      fillColor:isB?'#38bdf8':'#6b7fb0',fillOpacity:1}).addTo(gNodes);
+    m.on('click',ev=>{L.DomEvent.stop(ev);onNodeTap(n);});
+    if(isB&&n.name)m.bindTooltip(n.name,{permanent:true,direction:'right',className:'blabel',offset:[9,0]});
+    else if(n.name)m.bindTooltip(n.name,{direction:'top',className:'blabel',offset:[0,-6]});
+  });
+}
+
+/* ---- search ---- */
+const searchEl=$('#search'),resultsEl=$('#results');
+function renderResults(q){
+  q=(q||'').trim().toLowerCase();
+  let list=state.nodes.filter(n=>n.name);
+  if(q)list=list.filter(n=>n.name.toLowerCase().includes(q));
+  if(gps)list=list.map(n=>({n,d:hav(gps,n)})).sort((a,b)=>a.d-b.d);
+  else list=list.map(n=>({n,d:null}));
+  if(!q&&!gps)list=list.slice(0,40);
+  list=list.slice(0,30);
+  if(!list.length){resultsEl.classList.remove('show');return;}
+  resultsEl.innerHTML='<div class="rrow head">'+(q?'Matches':(gps?'Nearest to you':'All places'))+'</div>'+
+    list.map(({n,d})=>{const b=n.kind==='BUILDING'||n.type==='dest';
+      return '<div class="rrow" data-id="'+n.id+'"><div class="ic '+(b?'b':'r')+'">'+(b?'◆':'•')+'</div>'+
+        '<div class="nm">'+esc(n.name)+'</div>'+(d!=null?'<div class="dist">'+(d>=1000?(d/1000).toFixed(1)+'km':Math.round(d)+'m')+'</div>':'')+'</div>';}).join('');
+  resultsEl.classList.add('show');
+  resultsEl.querySelectorAll('.rrow[data-id]').forEach(r=>r.onclick=()=>{
+    const n=state.nodes.find(x=>x.id===r.dataset.id);resultsEl.classList.remove('show');searchEl.value=n.name;searchEl.blur();
+    map.flyTo([n.lat,n.lng],18,{duration:.6});ui.target=n.id;routeTo(n.id);});
+}
+searchEl.addEventListener('input',e=>renderResults(e.target.value));
+searchEl.addEventListener('focus',()=>renderResults(searchEl.value));
+document.addEventListener('click',e=>{if(!e.target.closest('.searchwrap'))resultsEl.classList.remove('show');});
+function esc(s){return(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+/* ---- tools / editing ---- */
+function setTool(t){ui.tool=t;ui.linkFrom=null;
+  document.querySelectorAll('.tool').forEach(x=>x.classList.toggle('active',x.dataset.tool===t));
+  $('#hint').textContent={nav:'Search or tap any place to route there from your GPS location.',
+    path:'Trace: tap along a walkway — each tap links to the last. “New segment” starts fresh.',
+    dest:'Add place: tap the map, then name it. It auto-links to the nearest path.',
+    link:'Link: tap two nodes to connect them.',del:'Delete: tap a node to remove it and its links.'}[t];measureSheet();}
+document.querySelectorAll('.tool').forEach(el=>el.onclick=()=>setTool(el.dataset.tool));
+map.on('click',e=>{const{lat,lng}=e.latlng;
+  if(ui.tool==='path')addPathNode(lat,lng);else if(ui.tool==='dest')addDest(lat,lng);else if(ui.tool==='link')ui.linkFrom=null;});
+function addPathNode(lat,lng){const n={id:uid(),lat,lng,type:'path',kind:'ROAD',name:''};state.nodes.push(n);
+  if(ui.lastPath&&state.nodes.find(x=>x.id===ui.lastPath))state.edges.push({a:ui.lastPath,b:n.id});ui.lastPath=n.id;commit();}
+function nearest(p,filter){let best=null;state.nodes.forEach(n=>{if(filter&&!filter(n))return;const d=hav(p,n);if(!best||d<best.d)best={n,d};});return best;}
+function addDest(lat,lng){const name=prompt('Name of this place:');if(name===null)return;
+  const n={id:uid(),lat,lng,type:'dest',kind:'BUILDING',name:name||'Place'};state.nodes.push(n);
+  const nr=nearest(n,x=>x.kind==='ROAD'||x.type==='path');if(nr&&nr.d<60)state.edges.push({a:n.id,b:nr.n.id});commit();}
+function onNodeTap(n){
+  if(ui.tool==='del'){state.nodes=state.nodes.filter(x=>x.id!==n.id);state.edges=state.edges.filter(e=>e.a!==n.id&&e.b!==n.id);if(ui.target===n.id)clearRoute();commit();return;}
+  if(ui.tool==='link'){if(!ui.linkFrom){ui.linkFrom=n.id;toast('Tap the node to link to');return;}
+    if(ui.linkFrom!==n.id&&!state.edges.some(e=>(e.a===ui.linkFrom&&e.b===n.id)||(e.a===n.id&&e.b===ui.linkFrom)))state.edges.push({a:ui.linkFrom,b:n.id});
+    ui.linkFrom=null;commit();return;}
+  if(ui.tool==='path'){if(ui.lastPath&&ui.lastPath!==n.id)state.edges.push({a:ui.lastPath,b:n.id});ui.lastPath=n.id;commit();return;}
+  // nav
+  if(!gps){ui.manualStart=n.id;toast('Start set: '+n.name+' — now tap a destination');return;}
+  ui.target=n.id;routeTo(n.id);
+}
+$('#surveyBtn').onclick=()=>{if(!gps){toast('No GPS fix yet');return;}addPathNode(gps.lat,gps.lng);toast('Dropped node at your location');};
+$('#breakBtn').onclick=()=>{ui.lastPath=null;toast('New segment started');};
+$('#navX').onclick=clearRoute;
+
+/* ---- GPS ---- */
+function startGPS(){if(!('geolocation' in navigator)){showBanner('This browser has no geolocation.');return;}
+  if(!window.isSecureContext)showBanner('GPS needs <b>https</b> (e.g. GitHub Pages) or <b>localhost</b>. Phones block location on plain http.');
+  navigator.geolocation.watchPosition(onPos,onErr,{enableHighAccuracy:true,maximumAge:1000,timeout:12000});}
+function onPos(p){gps={lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy};
+  $('#gpsDot').classList.add('live');hideBanner();drawGPS();ui.manualStart=null;
+  if(ui.follow)map.setView([gps.lat,gps.lng]);if(routeCache)throttle();}
+function onErr(e){$('#gpsDot').classList.remove('live');
+  if(e.code===1)showBanner('Location permission denied. Allow location for this site, then reload.');}
+let rt=null;function throttle(){clearTimeout(rt);rt=setTimeout(()=>{if(routeCache)routeTo(routeCache.destId);},2500);}
+function drawGPS(){const ll=[gps.lat,gps.lng];
+  if(!gpsMarker){gpsCircle=L.circle(ll,{radius:gps.acc,color:'#39d98a',weight:1,fillColor:'#39d98a',fillOpacity:.1}).addTo(map);
+    gpsMarker=L.circleMarker(ll,{radius:7,color:'#0b1020',weight:3,fillColor:'#39d98a',fillOpacity:1}).addTo(map);}
+  else{gpsMarker.setLatLng(ll);gpsCircle.setLatLng(ll).setRadius(gps.acc);}}
+$('#locateBtn').onclick=()=>{if(gps)map.setView([gps.lat,gps.lng],18);else toast('No GPS fix yet');};
+$('#followBtn').onclick=()=>{ui.follow=!ui.follow;$('#followBtn').classList.toggle('on',ui.follow);if(ui.follow&&gps)map.setView([gps.lat,gps.lng]);};
+
+/* ---- persistence & data ---- */
+async function commit(){render();if(routeCache)routeTo(routeCache.destId);
+  try{if(window.storage)await window.storage.set('skm-map',JSON.stringify(state));}catch(e){}}
+async function boot(){let loaded=null;
+  try{if(window.storage){const r=await window.storage.get('skm-map');if(r&&r.value)loaded=JSON.parse(r.value);}}catch(e){}
+  state=loaded&&loaded.nodes&&loaded.nodes.length?loaded:JSON.parse(JSON.stringify(SKM_DEFAULT));
+  render();fitAll();startGPS();measureSheet();}
+function fitAll(){if(state.nodes.length)map.fitBounds(L.latLngBounds(state.nodes.map(n=>[n.lat,n.lng])).pad(.18));}
+$('#exportBtn').onclick=()=>{const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='skm-map.json';a.click();toast('Exported skm-map.json');};
+$('#importInput').addEventListener('change',e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();
+  r.onload=()=>{try{const d=JSON.parse(r.result);if(!d.nodes)throw 0;state=d;ui.lastPath=null;clearRoute();render();fitAll();toast('Map imported');}catch(err){toast('Invalid file');}};
+  r.readAsText(f);e.target.value='';});
+$('#reloadBtn').onclick=()=>{if(confirm('Reload the original SKM campus data? This replaces the current map.')){state=JSON.parse(JSON.stringify(SKM_DEFAULT));ui.lastPath=null;clearRoute();commit();fitAll();toast('SKM data reloaded');}};
+$('#resetBtn').onclick=()=>{if(confirm('Clear the entire map?')){state={nodes:[],edges:[]};ui.lastPath=null;clearRoute();commit();}};
+
+/* ---- misc ---- */
+function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),1900);}
+function showBanner(h){const b=$('#banner');b.innerHTML=h;b.style.display='block';}
+function hideBanner(){$('#banner').style.display='none';}
+function measureSheet(){const h=$('#sheet').offsetHeight;document.documentElement.style.setProperty('--sheeth',h+'px');}
+window.addEventListener('resize',measureSheet);
+boot();
+</script>
+</body>
+</html>
